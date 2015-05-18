@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 )
 
-const urlListing = `<pre>{{range $i, $u :=  .}}<a href="{{$u}}">{{$u}}</a>{{end}}</pre>`
+const urlListing = `<pre>{{range $i, $u :=  .}}<a href="{{$u}}">{{$u}}</a>
+{{end}}</pre>`
 
 var (
 	templates *template.Template
