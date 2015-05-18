@@ -2,10 +2,14 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
+	"os"
+	"path"
 	"path/filepath"
+	"strings"
 )
 
 const urlListing = `<pre>{{range $i, $u :=  .}}<a href="{{$u}}">{{$u}}</a>
@@ -30,30 +34,80 @@ func init() {
 	}
 }
 
+func parseArg(arg string) (route string, fpath string, err error) {
+	chunks := strings.Split(arg, ":")
+	if len(chunks) != 2 {
+		err = fmt.Errorf("malformed argument: %s", arg)
+		return
+	}
+
+	route = path.Clean("/" + chunks[0])
+	fpath = filepath.Clean(chunks[1])
+
+	fi, err := os.Stat(fpath)
+	if err != nil {
+		return
+	}
+
+	if !fi.IsDir() {
+		err = fmt.Errorf("argument is not a dir (%s in %s)", fpath, arg)
+		return
+	}
+	if route != "/" {
+		route = route + "/"
+	}
+	return
+}
+
 func main() {
 	laddr := flag.String("l", ":8888", "listening address")
 	flag.Parse()
 
-	var paths []string
+	var (
+		routes   []string
+		needRoot = true
+	)
 
-	for _, dir := range flag.Args() {
-		dir = filepath.Clean(dir) + "/"
-		pathname := dir
-		http.Handle(pathname, http.StripPrefix(pathname, http.FileServer(http.Dir(dir))))
-		paths = append(paths, pathname)
+	for _, a := range flag.Args() {
+		route, fpath, err := parseArg(a)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		log.Println("Serving", fpath, "under", route)
+		addHandle(route, fpath)
+
+		routes = append(routes, route)
+		if route == "/" {
+			needRoot = false
+		}
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		err := templates.ExecuteTemplate(w, "urls", paths)
-		if err != nil {
-			code := http.StatusInternalServerError
-			http.Error(w, http.StatusText(code)+": "+err.Error(), code)
-		}
-	})
+	if needRoot {
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			err := templates.ExecuteTemplate(w, "urls", routes)
+			if err != nil {
+				code := http.StatusInternalServerError
+				http.Error(w, http.StatusText(code)+": "+err.Error(), code)
+			}
+		})
+	}
+
 	err := http.ListenAndServe(*laddr, logHandler(http.DefaultServeMux))
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Bye!")
+}
+
+func addHandle(route, fpath string) {
+	defer func() {
+		rec := recover()
+		if rec != nil {
+			log.Fatalf("Error, %v", rec)
+		}
+	}()
+
+	http.Handle(route, http.StripPrefix(route, http.FileServer(http.Dir(fpath))))
 }
